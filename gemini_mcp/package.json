@@ -1,0 +1,23 @@
+{
+  "name": "gemini-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for Gemini 2.5 Pro integration with Claude Code",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.7.0",
+    "@modelcontextprotocol/sdk": "^1.13.2"
+  },
+  "keywords": [
+    "mcp",
+    "gemini",
+    "ai",
+    "claude-code"
+  ],
+  "author": "junebaku",
+  "license": "MIT"
+}
