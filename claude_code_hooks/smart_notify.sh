@@ -3,7 +3,7 @@
 # Claude Code スマート通知スクリプト
 # transcript履歴を解析してタスクサマリーを生成
 
-set -euo
+set -eo pipefail
 
 # 標準入力からJSONを読み取り
 INPUT=$(cat)
@@ -45,7 +45,8 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ] && [ -s "$TRANSCRIPT_P
     # 最初のユーザーメッセージを取得（初期タスクとして）
     FIRST_USER_LINE=$(grep '"role":"user"' "$TRANSCRIPT_PATH" 2>/dev/null | head -1 || echo "")
     if [ -n "$FIRST_USER_LINE" ]; then
-        FIRST_USER_MSG=$(echo "$FIRST_USER_LINE" | grep -o '"content":"[^"]*"' | cut -d'"' -f4 || echo "")
+        # jqを使用してより正確にJSONを解析
+        FIRST_USER_MSG=$(echo "$FIRST_USER_LINE" | jq -r '.content // empty' 2>/dev/null || echo "")
     else
         FIRST_USER_MSG=""
     fi
@@ -93,37 +94,71 @@ fi
 # 現在時刻を取得
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
-# Slack通知メッセージを作成
-MESSAGE="🎯 Claude Codeセッション完了
-
-📁 プロジェクト: $PROJECT_DIR
-📋 タスク: ${SUMMARY:-"タスク実行"}
-💬 メッセージ数: ${MESSAGE_COUNT}件
-🕐 完了時刻: $TIMESTAMP"
-
-# ファイル操作サマリーがある場合は追加
+# Slack通知メッセージを作成（attachments形式）
+# メイン色を決定（ファイル操作の有無で色分け）
 if [ -n "$FILE_OPS" ]; then
-    MESSAGE="$MESSAGE
-
-📊 実行内容: $FILE_OPS"
+    ATTACHMENT_COLOR="good"  # 緑色：作業完了
+else
+    ATTACHMENT_COLOR="#36a64f"  # 青緑：情報のみ
 fi
 
-MESSAGE="$MESSAGE
+# ツールサマリーを整形
+FORMATTED_TOOLS=$(echo "$TOOL_SUMMARY" | sed 's/^  //' | tr '\n' ' | ' | sed 's/ | $//')
 
-🔧 使用ツール:
-$TOOL_SUMMARY"
+# attachments用のJSONを構築
+ATTACHMENT_JSON="{
+    \"color\": \"$ATTACHMENT_COLOR\",
+    \"title\": \"🎯 Claude Codeセッション完了\",
+    \"fields\": [
+        {
+            \"title\": \"📁 プロジェクト\",
+            \"value\": \"$PROJECT_DIR\",
+            \"short\": true
+        },
+        {
+            \"title\": \"💬 メッセージ数\",
+            \"value\": \"${MESSAGE_COUNT}件\",
+            \"short\": true
+        },
+        {
+            \"title\": \"📋 タスク内容\",
+            \"value\": \"${SUMMARY:-"タスク実行"}\",
+            \"short\": false
+        }"
+
+# ファイル操作がある場合は追加
+if [ -n "$FILE_OPS" ]; then
+    ATTACHMENT_JSON="$ATTACHMENT_JSON,
+        {
+            \"title\": \"📊 実行内容\",
+            \"value\": \"$FILE_OPS\",
+            \"short\": false
+        }"
+fi
+
+# ツール使用情報を追加
+ATTACHMENT_JSON="$ATTACHMENT_JSON,
+        {
+            \"title\": \"🔧 使用ツール\",
+            \"value\": \"$FORMATTED_TOOLS\",
+            \"short\": false
+        }
+    ],
+    \"footer\": \"Claude Code Hook\",
+    \"ts\": $(date +%s)
+}"
 
 # Slack通知を送信
 if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
-    # JSONエスケープ用の処理（より堅牢に）
-    ESCAPED_MESSAGE=$(printf '%s' "$MESSAGE" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g' | sed 's/\r/\\r/g' | sed 's/\t/\\t/g')
+    # attachments形式でSlackに送信（jqを使用してより安全に）
+    PAYLOAD=$(jq -n --argjson attachment "$ATTACHMENT_JSON" '{attachments: [$attachment]}')
 
     # curl でSlackに送信（エラーレスポンスも取得）
     TEMP_FILE=$(mktemp)
     HTTP_STATUS=$(curl -s -w "%{http_code}" -o "$TEMP_FILE" \
         -X POST \
         -H 'Content-type: application/json' \
-        --data "{\"text\":\"$ESCAPED_MESSAGE\"}" \
+        --data "$PAYLOAD" \
         "$SLACK_WEBHOOK_URL" 2>/dev/null || echo "000")
 
     if [ "$HTTP_STATUS" = "200" ]; then
