@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Claude Code スマート通知スクリプト
-# transcript履歴を解析してタスクサマリーを生成
+# Claude Code Slack通知スクリプト (Stop Hook用)
+# セッション終了時にtranscript履歴を解析してSlackにサマリーを送信
 
 set -eo pipefail
 
