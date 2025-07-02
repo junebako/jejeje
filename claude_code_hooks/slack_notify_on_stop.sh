@@ -70,15 +70,44 @@ if [ -n "$TRANSCRIPT_PATH" ] && [ -f "$TRANSCRIPT_PATH" ] && [ -s "$TRANSCRIPT_P
         [ "$BASH_COUNT" -gt 0 ] && FILE_OPS="${FILE_OPS}⚡${BASH_COUNT}回実行 "
     fi
 
-    # タスクサマリーを構築
-    if [ -n "$FIRST_USER_MSG" ]; then
-        if [ ${#FIRST_USER_MSG} -gt 120 ]; then
-            SUMMARY="${FIRST_USER_MSG:0:120}..."
+    # タスクサマリーを構築（Geminiで要約生成を試行）
+    SUMMARY=""
+
+    # 雑に: geminiコマンドがあれば何でも投げてみる
+    if command -v gemini >/dev/null 2>&1; then
+        echo "🤖 Geminiで作業内容を要約中..." >&2
+
+        # Geminiで要約生成（雑にJSONLファイルを丸投げ）
+        GEMINI_SUMMARY=$(gemini -p "このClaude Codeセッションの作業内容を日本語で1-2文で簡潔に要約してください。技術的な詳細は省いて、何をしたかの概要のみ記述してください。" < "$TRANSCRIPT_PATH" 2>/dev/null || echo "")
+
+        if [ -n "$GEMINI_SUMMARY" ] && [ "$GEMINI_SUMMARY" != "error" ]; then
+            # 要約が長すぎる場合は切り詰める
+            if [ ${#GEMINI_SUMMARY} -gt 200 ]; then
+                SUMMARY="${GEMINI_SUMMARY:0:200}..."
+            else
+                SUMMARY="$GEMINI_SUMMARY"
+            fi
+            echo "✅ Gemini要約生成完了: $SUMMARY" >&2
         else
-            SUMMARY="$FIRST_USER_MSG"
+            echo "⚠️  Gemini要約生成失敗、フォールバック使用" >&2
+            SUMMARY=""
         fi
     else
-        SUMMARY="タスク実行"
+        echo "⚠️  geminiコマンドが見つからないため手動要約を使用" >&2
+    fi
+
+    # フォールバック: Gemini要約が失敗した場合は従来の方式
+    if [ -z "$SUMMARY" ]; then
+        if [ -n "$FIRST_USER_MSG" ]; then
+            if [ ${#FIRST_USER_MSG} -gt 120 ]; then
+                SUMMARY="${FIRST_USER_MSG:0:120}..."
+            else
+                SUMMARY="$FIRST_USER_MSG"
+            fi
+        else
+            SUMMARY="タスク実行"
+        fi
+        echo "📋 フォールバック要約使用: $SUMMARY" >&2
     fi
 
     if [ -z "$TOOL_SUMMARY" ]; then
